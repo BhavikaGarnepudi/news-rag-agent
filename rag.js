@@ -5,7 +5,7 @@
  */
 
 const RAG_CONFIG = {
-  apiKey: 'YOUR_GEMINI_API_KEY_HERE',   // ← paste your key here (starts with AIza...)
+  apiKey: 'AIzaSyAMFBwQmAHBVUOkIySNYBG04b_IP1mp3hs',   // ← paste your key here (starts with AIza...)
   model: 'gemini-2.0-flash',
   apiEndpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
 };
