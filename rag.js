@@ -1,23 +1,23 @@
 /**
- * NewsRAG — RAG Pipeline Core
- * Handles Claude API calls with web_search tool enabled.
+ * NewsRAG — RAG Pipeline Core (Gemini Edition)
+ * Handles Gemini API calls with Google Search grounding enabled.
  * This is the heart of the Retrieval-Augmented Generation pipeline.
  */
 
 const RAG_CONFIG = {
-  apiEndpoint: 'https://api.anthropic.com/v1/messages',
-  model: 'claude-sonnet-4-20250514',
-  maxTokens: 1500,
+  apiKey: 'AIzaSyAMFBwQmAHBVUOkIySNYBG04b_IP1mp3hs',   // ← paste your key here (starts with AIza...)
+  model: 'gemini-2.0-flash',
+  apiEndpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
 };
 
 /**
  * MODE PROMPTS
- * Each mode instructs Claude to search the web and return structured JSON.
- * The web_search tool is what makes this a RAG system — Claude retrieves
+ * Each mode instructs Gemini to search the web and return structured JSON.
+ * Google Search grounding is what makes this a RAG system — Gemini retrieves
  * live documents and augments its generation with real sources.
  */
 const MODE_PROMPTS = {
-  full: `You are a professional AI news analyst with access to live web search.
+  full: `You are a professional AI news analyst with access to live Google Search.
 Search for recent news about the given topic from multiple sources.
 Analyze the retrieved articles and return ONLY a valid JSON object (no markdown, no backticks, no preamble):
 {
@@ -37,7 +37,7 @@ Analyze the retrieved articles and return ONLY a valid JSON object (no markdown,
 }
 Bias values: left, center-left, center, center-right, right. Trust 0.0-1.0.`,
 
-  debate: `You are a debate moderator AI with live web search access.
+  debate: `You are a debate moderator AI with live Google Search access.
 Search for multiple perspectives on the given topic and structure a rigorous debate.
 Return ONLY valid JSON (no markdown, no backticks):
 {
@@ -56,7 +56,7 @@ Return ONLY valid JSON (no markdown, no backticks):
   "sentiment": {"positive": 40, "negative": 40, "neutral": 20, "overallTone": "divided"}
 }`,
 
-  factcheck: `You are a rigorous AI fact-checker with live web search access.
+  factcheck: `You are a rigorous AI fact-checker with live Google Search access.
 Search authoritative sources to verify claims about the given topic.
 Return ONLY valid JSON (no markdown, no backticks):
 {
@@ -75,7 +75,7 @@ Return ONLY valid JSON (no markdown, no backticks):
   "sentiment": {"positive": 30, "negative": 30, "neutral": 40, "overallTone": "analytical"}
 }`,
 
-  sentiment: `You are a media sentiment analyst with live web search access.
+  sentiment: `You are a media sentiment analyst with live Google Search access.
 Search multiple news outlets covering the given topic and analyze their tone, framing, and bias.
 Return ONLY valid JSON (no markdown, no backticks):
 {
@@ -97,9 +97,9 @@ Return ONLY valid JSON (no markdown, no backticks):
 
 /**
  * runRAGPipeline
- * The core RAG function. Sends topic + mode prompt to Claude API
- * with web_search enabled. Claude autonomously retrieves sources
- * and generates a structured analysis.
+ * The core RAG function. Sends topic + mode prompt to Gemini API
+ * with Google Search grounding enabled. Gemini autonomously retrieves
+ * live sources and generates a structured analysis.
  *
  * @param {string} topic - The news topic to analyze
  * @param {string} mode - One of: full, debate, factcheck, sentiment
@@ -107,32 +107,39 @@ Return ONLY valid JSON (no markdown, no backticks):
  */
 async function runRAGPipeline(topic, mode = 'full') {
   const systemPrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.full;
+  const url = `${RAG_CONFIG.apiEndpoint}?key=${RAG_CONFIG.apiKey}`;
 
   const requestBody = {
-    model: RAG_CONFIG.model,
-    max_tokens: RAG_CONFIG.maxTokens,
-    // 🔑 This is what makes it RAG: web_search lets Claude retrieve
-    // live documents before generating its response
-    tools: [
-      {
-        type: 'web_search_20250305',
-        name: 'web_search'
-      }
-    ],
-    system: systemPrompt,
-    messages: [
+    systemInstruction: {
+      parts: [{ text: systemPrompt }]
+    },
+    contents: [
       {
         role: 'user',
-        content: `Analyze this news topic: "${topic}"\n\nSearch for the most recent and relevant sources. Return your complete analysis as a single JSON object.`
+        parts: [
+          {
+            text: `Analyze this news topic: "${topic}"\n\nSearch for the most recent and relevant sources using Google Search. Return your complete analysis as a single JSON object.`
+          }
+        ]
       }
-    ]
+    ],
+    // 🔑 This is what makes it RAG: Google Search grounding lets Gemini
+    // retrieve live documents before generating its response
+    tools: [
+      {
+        googleSearch: {}
+      }
+    ],
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 2000,
+    }
   };
 
-  const response = await fetch(RAG_CONFIG.apiEndpoint, {
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
-      // API key is injected by the Anthropic proxy — do not hardcode here
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify(requestBody)
   });
@@ -144,22 +151,23 @@ async function runRAGPipeline(topic, mode = 'full') {
 
   const data = await response.json();
 
-  // Collect all text blocks from the response (Claude may interleave
-  // tool_use and text blocks when using web search)
-  const fullText = data.content
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
-    .join('\n');
+  // Extract text from Gemini response format
+  const fullText = data.candidates?.[0]?.content?.parts
+    ?.filter(p => p.text)
+    ?.map(p => p.text)
+    ?.join('\n') || '';
+
+  if (!fullText) throw new Error('No response from Gemini API.');
 
   return parseRAGResponse(fullText);
 }
 
 /**
  * parseRAGResponse
- * Robustly extracts JSON from Claude's response, handling
+ * Robustly extracts JSON from Gemini's response, handling
  * markdown fences or stray text around the JSON object.
  *
- * @param {string} text - Raw text from Claude
+ * @param {string} text - Raw text from Gemini
  * @returns {Object} - Parsed analysis data
  */
 function parseRAGResponse(text) {
